@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile-upstream:master
+# syntax=docker-mirrors.alauda.cn/docker/dockerfile-upstream:master
 
 ARG RUNC_VERSION=v1.1.9
 ARG CONTAINERD_VERSION=v1.6.2
@@ -26,7 +26,7 @@ FROM --platform=$BUILDPLATFORM ${ALPINE_IMAGE}:${ALPINE_VERSION} AS git
 RUN apk add --no-cache git
 
 # xx is a helper for cross-compilation
-FROM --platform=$BUILDPLATFORM tonistiigi/xx@sha256:1e96844fadaa2f9aea021b2b05299bc02fe4c39a92d8e735b93e8e2b15610128 AS xx
+FROM --platform=$BUILDPLATFORM docker-mirrors.alauda.cn/tonistiigi/xx@sha256:1e96844fadaa2f9aea021b2b05299bc02fe4c39a92d8e735b93e8e2b15610128 AS xx
 
 FROM --platform=$BUILDPLATFORM golang:1.17-alpine AS golatest
 
@@ -91,7 +91,7 @@ RUN --mount=target=. --mount=target=/root/.cache,type=cache \
 FROM scratch AS binaries-linux-helper
 COPY --link --from=runc /usr/bin/runc /buildkit-runc
 # built from https://github.com/tonistiigi/binfmt/releases/tag/buildkit%2Fv6.2.0-24
-COPY --link --from=tonistiigi/binfmt:buildkit@sha256:ea7632b4e0b2406db438730c604339b38c23ac51a2f73c89ba50abe5e2146b4b / /
+COPY --link --from=docker-mirrors.alauda.cn/tonistiigi/binfmt:buildkit@sha256:ea7632b4e0b2406db438730c604339b38c23ac51a2f73c89ba50abe5e2146b4b / /
 FROM binaries-linux-helper AS binaries-linux
 COPY --link --from=buildctl /usr/bin/buildctl /
 COPY --link --from=buildkitd /usr/bin/buildkitd /
