@@ -9,6 +9,7 @@ import (
 	"github.com/containerd/containerd/remotes"
 	"github.com/containerd/containerd/remotes/docker"
 	"github.com/moby/buildkit/client/llb"
+	"github.com/moby/buildkit/util"
 	"github.com/moby/buildkit/util/contentutil"
 	"github.com/moby/buildkit/util/imageutil"
 	"github.com/moby/buildkit/version"
@@ -45,7 +46,7 @@ func New(with ...ImageMetaResolverOpt) llb.ImageMetaResolver {
 	headers.Set("User-Agent", version.UserAgent())
 	return &imageMetaResolver{
 		resolver: docker.NewResolver(docker.ResolverOptions{
-			Client:  http.DefaultClient,
+			Client:  util.DefaultInsecureClient(),
 			Headers: headers,
 		}),
 		platform: opts.platform,

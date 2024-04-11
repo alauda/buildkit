@@ -15,6 +15,7 @@ import (
 	distreference "github.com/docker/distribution/reference"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/source"
+	"github.com/moby/buildkit/util"
 	"github.com/moby/buildkit/version"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 )
@@ -96,7 +97,7 @@ func (p *Pool) GetResolver(hosts docker.RegistryHosts, ref, scope string, sm *se
 func newResolver(hosts docker.RegistryHosts, handler *authHandlerNS, sm *session.Manager, g session.Group) *Resolver {
 	if hosts == nil {
 		hosts = docker.ConfigureDefaultRegistries(
-			docker.WithClient(newDefaultClient()),
+			docker.WithClient(util.DefaultInsecureClient()),
 			docker.WithPlainHTTP(docker.MatchLocalhost),
 		)
 	}
@@ -111,6 +112,7 @@ func newResolver(hosts docker.RegistryHosts, handler *authHandlerNS, sm *session
 	r.Resolver = docker.NewResolver(docker.ResolverOptions{
 		Hosts:   r.HostsFunc,
 		Headers: headers,
+		Client:  util.DefaultInsecureClient(),
 	})
 	return r
 }
@@ -172,7 +174,8 @@ func (r *Resolver) WithSession(s session.Group) *Resolver {
 	r2.auth = nil
 	r2.g = s
 	r2.Resolver = docker.NewResolver(docker.ResolverOptions{
-		Hosts: r2.HostsFunc, // this refers to the newly-configured session so we need to recreate the resolver.
+		Hosts:  r2.HostsFunc, // this refers to the newly-configured session so we need to recreate the resolver.
+		Client: util.DefaultInsecureClient(),
 	})
 	return &r2
 }
