@@ -9,6 +9,7 @@ import (
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/remotes"
 	"github.com/containerd/containerd/remotes/docker"
+	"github.com/moby/buildkit/util"
 	"github.com/moby/buildkit/version"
 	"github.com/moby/locker"
 	digest "github.com/opencontainers/go-digest"
@@ -20,7 +21,7 @@ func ProviderFromRef(ref string) (ocispecs.Descriptor, content.Provider, error) 
 	headers := http.Header{}
 	headers.Set("User-Agent", version.UserAgent())
 	remote := docker.NewResolver(docker.ResolverOptions{
-		Client:  http.DefaultClient,
+		Client:  util.DefaultInsecureClient(),
 		Headers: headers,
 	})
 
@@ -40,7 +41,7 @@ func IngesterFromRef(ref string) (content.Ingester, error) {
 	headers := http.Header{}
 	headers.Set("User-Agent", version.UserAgent())
 	remote := docker.NewResolver(docker.ResolverOptions{
-		Client:  http.DefaultClient,
+		Client:  util.DefaultInsecureClient(),
 		Headers: headers,
 	})
 

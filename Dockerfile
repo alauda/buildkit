@@ -1,6 +1,6 @@
-# syntax=docker/dockerfile-upstream:master
+# syntax=docker-mirrors.alauda.cn/docker/dockerfile-upstream:master
 
-ARG RUNC_VERSION=v1.0.2
+ARG RUNC_VERSION=v1.1.9
 ARG CONTAINERD_VERSION=v1.6.2
 # containerd v1.5 for integration tests
 ARG CONTAINERD_ALT_VERSION_15=v1.5.11
@@ -13,14 +13,20 @@ ARG ROOTLESSKIT_VERSION=v0.14.6
 ARG CNI_VERSION=v1.1.0
 ARG STARGZ_SNAPSHOTTER_VERSION=v0.11.3
 
-ARG ALPINE_VERSION=3.15
+ARG ALPINE_IMAGE=build-harbor.alauda.cn/ops/alpine
+ARG ALPINE_VERSION=3
+# build from: https://gitlab-ce.alauda.cn/devops/builder-buildkit/-/tree/alpine-3.16/alpine
+ARG TONISTIIGI_ALPINE_IMAGE=build-harbor.alauda.cn/devops/tonistiigi/alpine
+ARG TONISTIIGI_ALPINE_VERSION=3.16.5-alpine-ffb5cd6b
+
+ 
 
 # git stage is used for checking out remote repository sources
-FROM --platform=$BUILDPLATFORM alpine:${ALPINE_VERSION} AS git
+FROM --platform=$BUILDPLATFORM ${ALPINE_IMAGE}:${ALPINE_VERSION} AS git
 RUN apk add --no-cache git
 
 # xx is a helper for cross-compilation
-FROM --platform=$BUILDPLATFORM tonistiigi/xx@sha256:1e96844fadaa2f9aea021b2b05299bc02fe4c39a92d8e735b93e8e2b15610128 AS xx
+FROM --platform=$BUILDPLATFORM docker-mirrors.alauda.cn/tonistiigi/xx@sha256:1e96844fadaa2f9aea021b2b05299bc02fe4c39a92d8e735b93e8e2b15610128 AS xx
 
 FROM --platform=$BUILDPLATFORM golang:1.17-alpine AS golatest
 
@@ -55,9 +61,11 @@ ENV GOFLAGS=-mod=vendor
 # scan the version/revision info
 FROM buildkit-base AS buildkit-version
 # TODO: PKG should be inferred from go modules
+ARG GIT_REVISION
+ARG GIT_VERSION
 RUN --mount=target=. \
-  PKG=github.com/moby/buildkit VERSION=$(git describe --match 'v[0-9]*' --dirty='.m' --always --tags) REVISION=$(git rev-parse HEAD)$(if ! git diff --no-ext-diff --quiet --exit-code; then echo .m; fi); \
-  echo "-X ${PKG}/version.Version=${VERSION} -X ${PKG}/version.Revision=${REVISION} -X ${PKG}/version.Package=${PKG}" | tee /tmp/.ldflags; \
+  PKG=github.com/moby/buildkit; \
+  echo "-X ${PKG}/version.Version=${GIT_VERSION} -X ${PKG}/version.Revision=${GIT_REVISION} -X ${PKG}/version.Package=${PKG}" | tee /tmp/.ldflags; \
   echo -n "${VERSION}" | tee /tmp/.version;
 
 # build buildctl binary
@@ -83,7 +91,7 @@ RUN --mount=target=. --mount=target=/root/.cache,type=cache \
 FROM scratch AS binaries-linux-helper
 COPY --link --from=runc /usr/bin/runc /buildkit-runc
 # built from https://github.com/tonistiigi/binfmt/releases/tag/buildkit%2Fv6.2.0-24
-COPY --link --from=tonistiigi/binfmt:buildkit@sha256:ea7632b4e0b2406db438730c604339b38c23ac51a2f73c89ba50abe5e2146b4b / /
+COPY --link --from=docker-mirrors.alauda.cn/tonistiigi/binfmt:buildkit@sha256:ea7632b4e0b2406db438730c604339b38c23ac51a2f73c89ba50abe5e2146b4b / /
 FROM binaries-linux-helper AS binaries-linux
 COPY --link --from=buildctl /usr/bin/buildctl /
 COPY --link --from=buildkitd /usr/bin/buildkitd /
@@ -96,7 +104,7 @@ COPY --link --from=buildctl /usr/bin/buildctl /buildctl.exe
 
 FROM binaries-$TARGETOS AS binaries
 
-FROM --platform=$BUILDPLATFORM alpine:${ALPINE_VERSION} AS releaser
+FROM --platform=$BUILDPLATFORM ${ALPINE_IMAGE}:${ALPINE_VERSION} AS releaser
 RUN apk add --no-cache tar gzip
 WORKDIR /work
 ARG TARGETPLATFORM
@@ -108,8 +116,8 @@ FROM scratch AS release
 COPY --link --from=releaser /out/ /
 
 # tonistiigi/alpine supports riscv64
-FROM tonistiigi/alpine:${ALPINE_VERSION} AS buildkit-export
-RUN apk add --no-cache fuse3 git openssh pigz xz \
+FROM ${TONISTIIGI_ALPINE_IMAGE}:${TONISTIIGI_ALPINE_VERSION} AS buildkit-export
+RUN apk add --no-cache fuse3 git openssh pigz xz jq bash skopeo\
   && ln -s fusermount3 /usr/bin/fusermount
 COPY --link examples/buildctl-daemonless/buildctl-daemonless.sh /usr/bin/
 VOLUME /var/lib/buildkit
@@ -208,7 +216,7 @@ COPY --link --from=buildkitd /usr/bin/buildkitd /buildkitd.exe
 
 FROM buildkit-buildkitd-$TARGETOS AS buildkit-buildkitd
 
-FROM alpine:${ALPINE_VERSION} AS containerd-runtime
+FROM ${ALPINE_IMAGE}:${ALPINE_VERSION} AS containerd-runtime
 COPY --link --from=runc /usr/bin/runc /usr/bin/
 COPY --link --from=containerd /out/containerd* /usr/bin/
 COPY --link --from=containerd /out/ctr /usr/bin/
@@ -256,8 +264,9 @@ FROM integration-tests AS dev-env
 VOLUME /var/lib/buildkit
 
 # Rootless mode.
-FROM tonistiigi/alpine:${ALPINE_VERSION} AS rootless
-RUN apk add --no-cache fuse3 fuse-overlayfs git openssh pigz shadow-uidmap xz
+FROM ${TONISTIIGI_ALPINE_IMAGE}:${TONISTIIGI_ALPINE_VERSION} AS rootless
+RUN sed -i 's+dl-cdn.alpinelinux.org+internal-mirrors.alauda.cn/repository+g' /etc/apk/repositories alpine && \
+    apk add --no-cache fuse3 fuse-overlayfs git openssh pigz shadow-uidmap xz jq bash curl skopeo
 RUN adduser -D -u 1000 user \
   && mkdir -p /run/user/1000 /home/user/.local/tmp /home/user/.local/share/buildkit \
   && chown -R user /run/user/1000 /home/user \

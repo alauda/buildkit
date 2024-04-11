@@ -6,8 +6,9 @@ binaries: FORCE
 
 images: FORCE
 # moby/buildkit:local and moby/buildkit:local-rootless are created on Docker
-	hack/images local moby/buildkit
-	TARGET=rootless hack/images local moby/buildkit
+# 	hack/images local moby/buildkit
+#	TARGET=rootless hack/images local moby/buildkit
+	hack/images v0.10.4-insecure build-harbor.alauda.cn/test/buildkit push
 
 install: FORCE
 	mkdir -p $(DESTDIR)$(bindir)
