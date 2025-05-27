@@ -1,13 +1,13 @@
 # syntax=docker-mirrors.alauda.cn/docker/dockerfile-upstream:master
 
 ARG MIRROR_REGISTRY=docker-mirrors.alauda.cn
-ARG RUNC_VERSION=v1.1.12
+ARG RUNC_VERSION=v1.1.15
 ARG CONTAINERD_VERSION=v1.7.11
 # containerd v1.6 for integration tests
 ARG CONTAINERD_ALT_VERSION_16=v1.6.24
 ARG REGISTRY_VERSION=v2.8.3
 ARG ROOTLESSKIT_VERSION=v2.0.0
-ARG CNI_VERSION=v1.6.2
+ARG CNI_VERSION=v1.7.1
 ARG STARGZ_SNAPSHOTTER_VERSION=v0.15.1
 ARG NERDCTL_VERSION=v1.6.2
 ARG DNSNAME_VERSION=v1.3.1
@@ -19,8 +19,8 @@ ARG GOTESTSUM_VERSION=v1.9.0
 ARG DELVE_VERSION=v1.21.0
 
 ARG GO_VERSION=1.24
-ARG ALPINE_VERSION=3.20
-ARG ALPINE_VERSION_ALAUDA=3.20.6-alauda-202502271510
+ARG ALPINE_VERSION=3.21
+ARG ALPINE_VERSION_ALAUDA=3.21.3-alauda-202502271510
 ARG ALPINE_IMAGE=build-harbor.alauda.cn/ops/alpine
 ARG XX_VERSION=1.4.0
 ARG BUILDKIT_DEBUG
@@ -71,7 +71,7 @@ RUN git clone https://github.com/opencontainers/runc.git runc \
 FROM ${MIRROR_REGISTRY}/library/golang:${GO_VERSION}-alpine${ALPINE_VERSION} AS runc-src-modifed
 COPY --from=runc-src /usr/src/runc /usr/src/runc
 WORKDIR /usr/src/runc
-RUN go get golang.org/x/net@v0.37.0 && go mod tidy && go mod vendor
+RUN go get golang.org/x/net@v0.38.0 && go mod tidy && go mod vendor
 
 # build runc binary
 FROM gobuild-base AS runc
