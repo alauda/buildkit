@@ -7,7 +7,7 @@ ARG CONTAINERD_VERSION=v1.7.11
 ARG CONTAINERD_ALT_VERSION_16=v1.6.24
 ARG REGISTRY_VERSION=v2.8.3
 ARG ROOTLESSKIT_VERSION=v2.0.0
-ARG CNI_VERSION=v1.7.1
+ARG CNI_VERSION=b0466813c32105b2402e760b9ad2f9eb25e66d5e
 ARG STARGZ_SNAPSHOTTER_VERSION=v0.15.1
 ARG NERDCTL_VERSION=v1.6.2
 ARG DNSNAME_VERSION=v1.3.1
@@ -71,7 +71,10 @@ RUN git clone https://github.com/opencontainers/runc.git runc \
 FROM ${MIRROR_REGISTRY}/library/golang:${GO_VERSION}-alpine${ALPINE_VERSION} AS runc-src-modifed
 COPY --from=runc-src /usr/src/runc /usr/src/runc
 WORKDIR /usr/src/runc
-RUN go get golang.org/x/net@v0.38.0 && go mod tidy && go mod vendor
+RUN go version && \
+    go mod edit -toolchain=go1.24.5 && \
+    go get golang.org/x/net@v0.38.0 && \
+    go mod tidy && go mod vendor
 
 # build runc binary
 FROM gobuild-base AS runc
@@ -97,7 +100,7 @@ ENV GOFLAGS=-mod=vendor
 FROM buildkit-base AS buildkit-version
 # TODO: PKG should be inferred from go modules
 RUN --mount=target=. \
-  PKG=github.com/moby/buildkit VERSION=$(git describe --match 'v[0-9]*' --dirty='.m' --always --tags) REVISION=$(git rev-parse HEAD)$(if ! git diff --no-ext-diff --quiet --exit-code; then echo .m; fi); \
+  PKG=github.com/moby/buildkit VERSION="v0.13.1" REVISION=$(git rev-parse HEAD)$(if ! git diff --no-ext-diff --quiet --exit-code; then echo .m; fi); \
   echo "-X ${PKG}/version.Version=${VERSION} -X ${PKG}/version.Revision=${REVISION} -X ${PKG}/version.Package=${PKG}" | tee /tmp/.ldflags; \
   echo -n "${VERSION}" | tee /tmp/.version;
 
@@ -172,15 +175,23 @@ RUN --mount=from=dnsname-src,src=/usr/src/dnsname,target=.,rw \
     CGO_ENABLED=0 xx-go build -o /usr/bin/dnsname ./plugins/meta/dnsname && \
     xx-verify --static /usr/bin/dnsname
 
-FROM --platform=$BUILDPLATFORM ${ALPINE_IMAGE}:${ALPINE_VERSION_ALAUDA} AS cni-plugins
-RUN apk add --no-cache curl
-COPY --from=xx / /
+FROM buildkit-base AS cni-plugins
 ARG CNI_VERSION
 ARG TARGETOS
 ARG TARGETARCH
 ARG TARGETPLATFORM
 WORKDIR /opt/cni/bin
-RUN curl -Ls https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-${TARGETOS}-${TARGETARCH}-${CNI_VERSION}.tgz | tar xzv
+RUN git clone --depth 1 https://github.com/containernetworking/plugins && \
+    cd plugins && \
+    git fetch origin ${CNI_VERSION} && \
+    git checkout ${CNI_VERSION} && \
+    export CGO_ENABLED=0 && \
+    export GOOS=$TARGETOS && \
+    export GOARCH=$TARGETARCH && \
+    xx-go build -mod=vendor -o /opt/cni/bin/bridge ./plugins/main/bridge && /opt/cni/bin/bridge version && \
+    xx-go build -mod=vendor -o /opt/cni/bin/loopback ./plugins/main/loopback && /opt/cni/bin/loopback version && \
+    xx-go build -mod=vendor -o /opt/cni/bin/host-local ./plugins/ipam/host-local && /opt/cni/bin/host-local version && \
+    xx-go build -mod=vendor -o /opt/cni/bin/firewall ./plugins/meta/firewall && /opt/cni/bin/firewall version
 RUN xx-verify --static bridge loopback host-local
 COPY --link --from=dnsname /usr/bin/dnsname /opt/cni/bin/
 
