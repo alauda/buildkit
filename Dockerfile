@@ -7,7 +7,7 @@ ARG CONTAINERD_VERSION=v1.7.11
 ARG CONTAINERD_ALT_VERSION_16=v1.6.24
 ARG REGISTRY_VERSION=v2.8.3
 ARG ROOTLESSKIT_VERSION=v2.0.0
-ARG CNI_VERSION=b0466813c32105b2402e760b9ad2f9eb25e66d5e
+ARG CNI_VERSION=v1.8.0
 ARG STARGZ_SNAPSHOTTER_VERSION=v0.15.1
 ARG NERDCTL_VERSION=v1.6.2
 ARG DNSNAME_VERSION=v1.3.1
@@ -188,10 +188,11 @@ RUN git clone --depth 1 https://github.com/containernetworking/plugins && \
     export CGO_ENABLED=0 && \
     export GOOS=$TARGETOS && \
     export GOARCH=$TARGETARCH && \
-    xx-go build -mod=vendor -o /opt/cni/bin/bridge ./plugins/main/bridge && /opt/cni/bin/bridge version && \
-    xx-go build -mod=vendor -o /opt/cni/bin/loopback ./plugins/main/loopback && /opt/cni/bin/loopback version && \
-    xx-go build -mod=vendor -o /opt/cni/bin/host-local ./plugins/ipam/host-local && /opt/cni/bin/host-local version && \
-    xx-go build -mod=vendor -o /opt/cni/bin/firewall ./plugins/meta/firewall && /opt/cni/bin/firewall version
+    export LDFLAGS="-X github.com/containernetworking/plugins/pkg/utils/buildversion.BuildVersion=${CNI_VERSION}" && \
+    xx-go build -mod=vendor -ldflags="${LDFLAGS}" -o /opt/cni/bin/bridge ./plugins/main/bridge && /opt/cni/bin/bridge version && \
+    xx-go build -mod=vendor -ldflags="${LDFLAGS}" -o /opt/cni/bin/loopback ./plugins/main/loopback && /opt/cni/bin/loopback version && \
+    xx-go build -mod=vendor -ldflags="${LDFLAGS}" -o /opt/cni/bin/host-local ./plugins/ipam/host-local && /opt/cni/bin/host-local version && \
+    xx-go build -mod=vendor -ldflags="${LDFLAGS}" -o /opt/cni/bin/firewall ./plugins/meta/firewall && /opt/cni/bin/firewall version
 RUN xx-verify --static bridge loopback host-local
 COPY --link --from=dnsname /usr/bin/dnsname /opt/cni/bin/
 
@@ -451,7 +452,7 @@ VOLUME /var/lib/buildkit
 
 # Rootless mode.
 FROM alpinebase AS rootless
-RUN apk add --no-cache fuse3 fuse-overlayfs git openssh pigz shadow-uidmap xz
+RUN apk add --no-cache fuse3 fuse-overlayfs git openssh pigz shadow-uidmap xz && apk upgrade --no-cache
 RUN adduser -D -u 1000 user \
   && mkdir -p /run/user/1000 /home/user/.local/tmp /home/user/.local/share/buildkit \
   && chown -R user /run/user/1000 /home/user \
