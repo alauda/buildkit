@@ -2,7 +2,7 @@ module github.com/moby/buildkit
 
 go 1.23.0
 
-toolchain go1.24.5
+toolchain go1.24.6
 
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.6.0

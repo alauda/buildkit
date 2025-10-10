@@ -181,10 +181,8 @@ ARG TARGETOS
 ARG TARGETARCH
 ARG TARGETPLATFORM
 WORKDIR /opt/cni/bin
-RUN git clone --depth 1 https://github.com/containernetworking/plugins && \
+RUN git clone --branch ${CNI_VERSION} --depth 1 https://github.com/containernetworking/plugins && \
     cd plugins && \
-    git fetch origin ${CNI_VERSION} && \
-    git checkout ${CNI_VERSION} && \
     export CGO_ENABLED=0 && \
     export GOOS=$TARGETOS && \
     export GOARCH=$TARGETARCH && \
@@ -243,6 +241,8 @@ COPY --link --from=releaser /out/ /
 
 FROM alpinebase AS buildkit-export
 RUN apk add --no-cache fuse3 git openssh pigz xz iptables ip6tables bash skopeo \
+  && apk upgrade --no-cache libcrypto3 libssl3 \
+  && rm -f /usr/bin/nc \
   && ln -s fusermount3 /usr/bin/fusermount
 COPY --link examples/buildctl-daemonless/buildctl-daemonless.sh /usr/bin/
 VOLUME /var/lib/buildkit
