@@ -72,6 +72,7 @@ FROM ${MIRROR_REGISTRY}/library/golang:${GO_VERSION}-alpine${ALPINE_VERSION} AS 
 COPY --from=runc-src /usr/src/runc /usr/src/runc
 WORKDIR /usr/src/runc
 RUN go version && \
+    go get golang.org/x/net@v0.38.0 && \
     go mod tidy && go mod vendor
 
 # build runc binary
@@ -239,7 +240,7 @@ COPY --link --from=releaser /out/ /
 
 FROM alpinebase AS buildkit-export
 RUN apk add --no-cache fuse3 git openssh pigz xz iptables ip6tables bash skopeo \
-  && apk upgrade --no-cache libcrypto3 libssl3 \
+  && apk upgrade --no-cache \
   && rm -f /usr/bin/nc \
   && ln -s fusermount3 /usr/bin/fusermount
 COPY --link examples/buildctl-daemonless/buildctl-daemonless.sh /usr/bin/
