@@ -1,7 +1,7 @@
 # syntax=docker-mirrors.alauda.cn/docker/dockerfile-upstream:master
 
 ARG MIRROR_REGISTRY=docker-mirrors.alauda.cn
-ARG RUNC_VERSION=v1.1.15
+ARG RUNC_VERSION=v1.2.8
 ARG CONTAINERD_VERSION=v1.7.11
 # containerd v1.6 for integration tests
 ARG CONTAINERD_ALT_VERSION_16=v1.6.24
@@ -18,7 +18,7 @@ ARG AZURITE_VERSION=3.18.0
 ARG GOTESTSUM_VERSION=v1.9.0
 ARG DELVE_VERSION=v1.21.0
 
-ARG GO_VERSION=1.24
+ARG GO_VERSION=1.25
 ARG ALPINE_VERSION=3.21
 ARG ALPINE_VERSION_ALAUDA=3.21.3-alauda-202502271510
 ARG ALPINE_IMAGE=build-harbor.alauda.cn/ops/alpine
@@ -72,7 +72,6 @@ FROM ${MIRROR_REGISTRY}/library/golang:${GO_VERSION}-alpine${ALPINE_VERSION} AS 
 COPY --from=runc-src /usr/src/runc /usr/src/runc
 WORKDIR /usr/src/runc
 RUN go version && \
-    go mod edit -toolchain=go1.24.5 && \
     go get golang.org/x/net@v0.38.0 && \
     go mod tidy && go mod vendor
 
@@ -241,7 +240,7 @@ COPY --link --from=releaser /out/ /
 
 FROM alpinebase AS buildkit-export
 RUN apk add --no-cache fuse3 git openssh pigz xz iptables ip6tables bash skopeo \
-  && apk upgrade --no-cache libcrypto3 libssl3 \
+  && apk upgrade --no-cache \
   && rm -f /usr/bin/nc \
   && ln -s fusermount3 /usr/bin/fusermount
 COPY --link examples/buildctl-daemonless/buildctl-daemonless.sh /usr/bin/

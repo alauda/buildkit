@@ -69,7 +69,7 @@ spec:
             --build-arg commit_id=$(build.git.lastCommit.id)
             --build-arg GIT_REVISION=$(build.git.lastCommit.id)
             --build-arg GIT_VERSION=$(build.git.version.docker)
-            --build-arg RUNC_VERSION=release-1.1
+            --build-arg RUNC_VERSION=release-1.2
         - name: platform
           value:
             - linux/amd64
