@@ -1,4 +1,4 @@
-package registry // import "github.com/docker/docker/registry"
+package registry
 
 import (
 	"context"
@@ -66,11 +66,11 @@ func (scs staticCredentialStore) SetRefreshToken(*url.URL, string, string) {
 // loginV2 tries to login to the v2 registry server. The given registry
 // endpoint will be pinged to get authorization challenges. These challenges
 // will be used to authenticate against the registry to validate credentials.
-func loginV2(authConfig *registry.AuthConfig, endpoint APIEndpoint, userAgent string) (token string, _ error) {
+func loginV2(ctx context.Context, authConfig *registry.AuthConfig, endpoint APIEndpoint, userAgent string) (token string, _ error) {
 	endpointStr := strings.TrimRight(endpoint.URL.String(), "/") + "/v2/"
-	log.G(context.TODO()).Debugf("attempting v2 login to registry endpoint %s", endpointStr)
+	log.G(ctx).WithField("endpoint", endpointStr).Debug("attempting v2 login to registry endpoint")
 
-	req, err := http.NewRequest(http.MethodGet, endpointStr, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpointStr, http.NoBody)
 	if err != nil {
 		return "", err
 	}
@@ -181,7 +181,7 @@ func PingV2Registry(endpoint *url.URL, transport http.RoundTripper) (challenge.M
 		Timeout:   15 * time.Second,
 	}
 	endpointStr := strings.TrimRight(endpoint.String(), "/") + "/v2/"
-	req, err := http.NewRequest(http.MethodGet, endpointStr, nil)
+	req, err := http.NewRequest(http.MethodGet, endpointStr, http.NoBody)
 	if err != nil {
 		return nil, err
 	}
