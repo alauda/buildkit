@@ -1,0 +1,9 @@
+# Ignore these Moby vulnerabilities in all Trivy scans until the upstream dependency is upgraded.
+#
+# go.mod has `replace github.com/docker/docker => github.com/moby/moby v28.5.3-0.20260325154711-31a1689cb0a1+incompatible`.
+# These two CVEs have been effectively fixed by that patched Moby commit,
+# but the Trivy vulnerability database has not yet recognized the
+# pseudo-version as carrying the fix and still flags the same CVE IDs.
+# Ref: https://github.com/moby/moby/commit/31a1689cb0a1b92f8521997666d1442acd4bc9b0
+CVE-2026-34040
+CVE-2026-33997

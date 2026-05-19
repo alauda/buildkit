@@ -1,4 +1,4 @@
-package registry // import "github.com/docker/docker/registry"
+package registry
 
 import (
 	"context"
@@ -19,8 +19,6 @@ import (
 
 // ServiceOptions holds command line options.
 type ServiceOptions struct {
-	AllowNondistributableArtifacts []string `json:"allow-nondistributable-artifacts,omitempty"` // Deprecated: non-distributable artifacts are deprecated and enabled by default. This field will be removed in the next release.
-
 	Mirrors            []string `json:"registry-mirrors,omitempty"`
 	InsecureRegistries []string `json:"insecure-registries,omitempty"`
 }
@@ -294,15 +292,23 @@ func isCIDRMatch(cidrs []*registry.NetIPNet, URLHost string) bool {
 	return false
 }
 
-// ValidateMirror validates an HTTP(S) registry mirror. It is used by the daemon
-// to validate the daemon configuration.
-func ValidateMirror(val string) (string, error) {
-	uri, err := url.Parse(val)
+// ValidateMirror validates and normalizes an HTTP(S) registry mirror. It
+// returns an error if the given mirrorURL is invalid, or the normalized
+// format for the URL otherwise.
+//
+// It is used by the daemon to validate the daemon configuration.
+func ValidateMirror(mirrorURL string) (string, error) {
+	// Fast path for missing scheme, as url.Parse splits by ":", which can
+	// cause the hostname to be considered the "scheme" when using "hostname:port".
+	if scheme, _, ok := strings.Cut(mirrorURL, "://"); !ok || scheme == "" {
+		return "", invalidParamf("invalid mirror: no scheme specified for %q: must use either 'https://' or 'http://'", mirrorURL)
+	}
+	uri, err := url.Parse(mirrorURL)
 	if err != nil {
-		return "", invalidParamWrapf(err, "invalid mirror: %q is not a valid URI", val)
+		return "", invalidParamWrapf(err, "invalid mirror: %q is not a valid URI", mirrorURL)
 	}
 	if uri.Scheme != "http" && uri.Scheme != "https" {
-		return "", invalidParamf("invalid mirror: unsupported scheme %q in %q", uri.Scheme, uri)
+		return "", invalidParamf("invalid mirror: unsupported scheme %q in %q: must use either 'https://' or 'http://'", uri.Scheme, uri)
 	}
 	if uri.RawQuery != "" || uri.Fragment != "" {
 		return "", invalidParamf("invalid mirror: query or fragment at end of the URI %q", uri)
@@ -312,7 +318,7 @@ func ValidateMirror(val string) (string, error) {
 		uri.User = url.UserPassword(uri.User.Username(), "xxxxx")
 		return "", invalidParamf("invalid mirror: username/password not allowed in URI %q", uri)
 	}
-	return strings.TrimSuffix(val, "/") + "/", nil
+	return strings.TrimSuffix(mirrorURL, "/") + "/", nil
 }
 
 // ValidateIndexName validates an index name. It is used by the daemon to
@@ -414,7 +420,6 @@ func newRepositoryInfo(config *serviceConfig, name reference.Named) *RepositoryI
 func ParseRepositoryInfo(reposName reference.Named) (*RepositoryInfo, error) {
 	indexName := normalizeIndexName(reference.Domain(reposName))
 	if indexName == IndexName {
-		officialRepo := !strings.ContainsRune(reference.FamiliarName(reposName), '/')
 		return &RepositoryInfo{
 			Name: reference.TrimNamed(reposName),
 			Index: &registry.IndexInfo{
@@ -423,13 +428,8 @@ func ParseRepositoryInfo(reposName reference.Named) (*RepositoryInfo, error) {
 				Secure:   true,
 				Official: true,
 			},
-			Official: officialRepo,
+			Official: !strings.ContainsRune(reference.FamiliarName(reposName), '/'),
 		}, nil
-	}
-
-	insecure := false
-	if isInsecure(indexName) {
-		insecure = true
 	}
 
 	return &RepositoryInfo{
@@ -437,7 +437,7 @@ func ParseRepositoryInfo(reposName reference.Named) (*RepositoryInfo, error) {
 		Index: &registry.IndexInfo{
 			Name:    indexName,
 			Mirrors: []string{},
-			Secure:  !insecure,
+			Secure:  !isInsecure(indexName),
 		},
 	}, nil
 }
