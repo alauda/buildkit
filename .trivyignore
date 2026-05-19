@@ -1,0 +1,22 @@
+# .trivyignore — exceptions for trivy vulnerability scan
+#
+# CVE-2026-34040 and CVE-2026-33997 affect github.com/docker/docker (moby/moby).
+# The upstream fix lives in moby/moby v29.3.x, which uses a new module path
+# (github.com/moby/moby) and introduces breaking API changes that are
+# incompatible with the buildkit v0.13.1 codebase:
+#   - removed idtools.LoadIdentityMapping (used in cmd/buildkitd/util_linux.go)
+#   - changed archive.Compression type location (moved to compression sub-package)
+#
+# Bumping docker/docker within the v28.x series (e.g. v28.5.2) also breaks the
+# build because the same API removals were back-ported to that line.
+# The katanomi/moby fork referenced in the 2026-05 CVE sweep playbook does not
+# exist as a resolvable Go module at the time of this sweep.
+#
+# These CVEs affect Docker daemon plugin authz / privilege-validation code paths
+# that are NOT exercised by BuildKit: BuildKit runs as its own daemon and does
+# not invoke the moby plugin installation or Docker Engine authz middleware.
+#
+# Exception should be removed when alauda/buildkit alauda/v0.13.1 is rebased
+# onto upstream buildkit >= v0.18 (which already depends on moby/moby v29).
+CVE-2026-34040
+CVE-2026-33997
