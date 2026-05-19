@@ -1,0 +1,22 @@
+# These CVEs require docker/cli or docker/docker to be upgraded to v29+.
+# The v29 release series changed the Go module path and broke API compatibility
+# with the interfaces used in this alauda/v0.10.4 branch.  A full port is
+# out-of-scope for a security-only sweep; both entries are documented here so
+# that trivy CI does not fail on findings that cannot be resolved without a
+# major refactor.
+#
+# CVE-2025-15558 — docker/cli: Windows-only privilege escalation via malicious
+#   plugin binaries.  Fixed in docker/cli v29.2.0.  This branch uses
+#   v23.0.3+incompatible; upgrading to v29 is incompatible with the v0.10.4 API.
+#   Impact is Windows-only; BuildKit in production runs on Linux.
+CVE-2025-15558
+
+# CVE-2026-34040 — Moby/docker: Authorization bypass vulnerability.
+#   Fixed in docker/docker v29.3.1.  This branch uses v26.1.5+incompatible;
+#   upgrading to v29 requires a major module-path change and API refactor.
+CVE-2026-34040
+
+# CVE-2026-33997 — Moby/docker: Privilege escalation vulnerability.
+#   Fixed in docker/docker v29.3.1.  Same root cause as CVE-2026-34040 above;
+#   both require the v29 module-path migration which is out-of-scope here.
+CVE-2026-33997

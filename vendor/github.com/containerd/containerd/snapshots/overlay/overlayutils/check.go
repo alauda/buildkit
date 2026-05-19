@@ -1,5 +1,4 @@
 //go:build linux
-// +build linux
 
 /*
    Copyright The containerd Authors.
@@ -25,11 +24,12 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/moby/sys/userns"
+
 	kernel "github.com/containerd/containerd/contrib/seccomp/kernelversion"
-	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/mount"
-	"github.com/containerd/containerd/pkg/userns"
 	"github.com/containerd/continuity/fs"
+	"github.com/containerd/log"
 )
 
 const (
@@ -176,6 +176,7 @@ func NeedsUserXAttr(d string) (bool, error) {
 	}
 
 	opts := []string{
+		"ro",
 		fmt.Sprintf("lowerdir=%s:%s,upperdir=%s,workdir=%s", filepath.Join(td, "lower2"), filepath.Join(td, "lower1"), filepath.Join(td, "upper"), filepath.Join(td, "work")),
 		"userxattr",
 	}

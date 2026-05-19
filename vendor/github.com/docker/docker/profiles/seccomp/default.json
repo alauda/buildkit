@@ -48,6 +48,10 @@
 			"subArchitectures": [
 				"SCMP_ARCH_S390"
 			]
+		},
+		{
+			"architecture": "SCMP_ARCH_RISCV64",
+			"subArchitectures": null
 		}
 	],
 	"syscalls": [
@@ -60,6 +64,7 @@
 				"alarm",
 				"bind",
 				"brk",
+				"cachestat",
 				"capget",
 				"capset",
 				"chdir",
@@ -105,6 +110,7 @@
 				"fchdir",
 				"fchmod",
 				"fchmodat",
+				"fchmodat2",
 				"fchown",
 				"fchown32",
 				"fchownat",
@@ -126,7 +132,11 @@
 				"ftruncate",
 				"ftruncate64",
 				"futex",
+				"futex_requeue",
 				"futex_time64",
+				"futex_wait",
+				"futex_waitv",
+				"futex_wake",
 				"futimesat",
 				"getcpu",
 				"getcwd",
@@ -164,6 +174,7 @@
 				"getuid",
 				"getuid32",
 				"getxattr",
+				"getxattrat",
 				"inotify_add_watch",
 				"inotify_init",
 				"inotify_init1",
@@ -178,18 +189,20 @@
 				"ioprio_set",
 				"io_setup",
 				"io_submit",
-				"io_uring_enter",
-				"io_uring_register",
-				"io_uring_setup",
 				"ipc",
 				"kill",
+				"landlock_add_rule",
+				"landlock_create_ruleset",
+				"landlock_restrict_self",
 				"lchown",
 				"lchown32",
 				"lgetxattr",
 				"link",
 				"linkat",
 				"listen",
+				"listmount",
 				"listxattr",
+				"listxattrat",
 				"llistxattr",
 				"_llseek",
 				"lremovexattr",
@@ -198,8 +211,10 @@
 				"lstat",
 				"lstat64",
 				"madvise",
+				"map_shadow_stack",
 				"membarrier",
 				"memfd_create",
+				"memfd_secret",
 				"mincore",
 				"mkdir",
 				"mkdirat",
@@ -220,6 +235,7 @@
 				"mq_timedsend_time64",
 				"mq_unlink",
 				"mremap",
+				"mseal",
 				"msgctl",
 				"msgget",
 				"msgrcv",
@@ -228,6 +244,7 @@
 				"munlock",
 				"munlockall",
 				"munmap",
+				"name_to_handle_at",
 				"nanosleep",
 				"newfstatat",
 				"_newselect",
@@ -239,6 +256,9 @@
 				"pidfd_send_signal",
 				"pipe",
 				"pipe2",
+				"pkey_alloc",
+				"pkey_free",
+				"pkey_mprotect",
 				"poll",
 				"ppoll",
 				"ppoll_time64",
@@ -247,6 +267,7 @@
 				"preadv",
 				"preadv2",
 				"prlimit64",
+				"process_mrelease",
 				"pselect6",
 				"pselect6_time64",
 				"pwrite64",
@@ -264,10 +285,12 @@
 				"recvmsg",
 				"remap_file_pages",
 				"removexattr",
+				"removexattrat",
 				"rename",
 				"renameat",
 				"renameat2",
 				"restart_syscall",
+				"riscv_hwprobe",
 				"rmdir",
 				"rseq",
 				"rt_sigaction",
@@ -333,6 +356,7 @@
 				"setuid",
 				"setuid32",
 				"setxattr",
+				"setxattrat",
 				"shmat",
 				"shmctl",
 				"shmdt",
@@ -343,7 +367,6 @@
 				"signalfd4",
 				"sigprocmask",
 				"sigreturn",
-				"socket",
 				"socketcall",
 				"socketpair",
 				"splice",
@@ -351,6 +374,7 @@
 				"stat64",
 				"statfs",
 				"statfs64",
+				"statmount",
 				"statx",
 				"symlink",
 				"symlinkat",
@@ -382,6 +406,7 @@
 				"uname",
 				"unlink",
 				"unlinkat",
+				"uretprobe",
 				"utime",
 				"utimensat",
 				"utimensat_time64",
@@ -406,6 +431,19 @@
 			"includes": {
 				"minKernel": "4.8"
 			}
+		},
+		{
+			"names": [
+				"socket"
+			],
+			"action": "SCMP_ACT_ALLOW",
+			"args": [
+				{
+					"index": 0,
+					"value": 40,
+					"op": "SCMP_CMP_NE"
+				}
+			]
 		},
 		{
 			"names": [
@@ -542,6 +580,17 @@
 		},
 		{
 			"names": [
+				"riscv_flush_icache"
+			],
+			"action": "SCMP_ACT_ALLOW",
+			"includes": {
+				"arches": [
+					"riscv64"
+				]
+			}
+		},
+		{
+			"names": [
 				"open_by_handle_at"
 			],
 			"action": "SCMP_ACT_ALLOW",
@@ -562,12 +611,16 @@
 				"fsopen",
 				"fspick",
 				"lookup_dcookie",
+				"lsm_get_self_attr",
+				"lsm_list_modules",
+				"lsm_set_self_attr",
 				"mount",
+				"mount_setattr",
 				"move_mount",
-				"name_to_handle_at",
 				"open_tree",
 				"perf_event_open",
 				"quotactl",
+				"quotactl_fd",
 				"setdomainname",
 				"sethostname",
 				"setns",
@@ -720,7 +773,8 @@
 			"names": [
 				"settimeofday",
 				"stime",
-				"clock_settime"
+				"clock_settime",
+				"clock_settime64"
 			],
 			"action": "SCMP_ACT_ALLOW",
 			"includes": {
@@ -744,7 +798,8 @@
 			"names": [
 				"get_mempolicy",
 				"mbind",
-				"set_mempolicy"
+				"set_mempolicy",
+				"set_mempolicy_home_node"
 			],
 			"action": "SCMP_ACT_ALLOW",
 			"includes": {
@@ -761,6 +816,28 @@
 			"includes": {
 				"caps": [
 					"CAP_SYSLOG"
+				]
+			}
+		},
+		{
+			"names": [
+				"bpf"
+			],
+			"action": "SCMP_ACT_ALLOW",
+			"includes": {
+				"caps": [
+					"CAP_BPF"
+				]
+			}
+		},
+		{
+			"names": [
+				"perf_event_open"
+			],
+			"action": "SCMP_ACT_ALLOW",
+			"includes": {
+				"caps": [
+					"CAP_PERFMON"
 				]
 			}
 		}

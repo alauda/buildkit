@@ -24,11 +24,10 @@ import (
 
 	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/diff"
-	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/mount"
+	"github.com/containerd/log"
 	digest "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/sirupsen/logrus"
 )
 
 // NewFileSystemApplier returns an applier which simply mounts
@@ -52,7 +51,7 @@ func (s *fsApplier) Apply(ctx context.Context, desc ocispec.Descriptor, mounts [
 	t1 := time.Now()
 	defer func() {
 		if err == nil {
-			log.G(ctx).WithFields(logrus.Fields{
+			log.G(ctx).WithFields(log.Fields{
 				"d":      time.Since(t1),
 				"digest": desc.Digest,
 				"size":   desc.Size,
@@ -93,7 +92,7 @@ func (s *fsApplier) Apply(ctx context.Context, desc ocispec.Descriptor, mounts [
 		r: io.TeeReader(processor, digester.Hash()),
 	}
 
-	if err := apply(ctx, mounts, rc); err != nil {
+	if err := apply(ctx, mounts, rc, config.SyncFs); err != nil {
 		return emptyDesc, err
 	}
 
@@ -125,6 +124,8 @@ type readCounter struct {
 
 func (rc *readCounter) Read(p []byte) (n int, err error) {
 	n, err = rc.r.Read(p)
-	rc.c += int64(n)
+	if n > 0 {
+		rc.c += int64(n)
+	}
 	return
 }

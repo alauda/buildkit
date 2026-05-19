@@ -1,5 +1,4 @@
 //go:build linux
-// +build linux
 
 /*
    Copyright The containerd Authors.
@@ -27,16 +26,16 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/mount"
 	"github.com/containerd/containerd/snapshots"
 	"github.com/containerd/containerd/snapshots/overlay/overlayutils"
 	"github.com/containerd/containerd/snapshots/storage"
 	"github.com/containerd/continuity/fs"
+	"github.com/containerd/log"
 	"github.com/sirupsen/logrus"
 )
 
-// upperdirKey is a key of an optional lablel to each snapshot.
+// upperdirKey is a key of an optional label to each snapshot.
 // This optional label of a snapshot contains the location of "upperdir" where
 // the change set between this snapshot and its parent is stored.
 const upperdirKey = "containerd.io/snapshot/overlay.upperdir"
@@ -45,6 +44,8 @@ const upperdirKey = "containerd.io/snapshot/overlay.upperdir"
 type SnapshotterConfig struct {
 	asyncRemove   bool
 	upperdirLabel bool
+	ms            MetaStore
+	mountOptions  []string
 }
 
 // Opt is an option to configure the overlay snapshotter
@@ -68,13 +69,36 @@ func WithUpperdirLabel(config *SnapshotterConfig) error {
 	return nil
 }
 
+// WithMountOptions defines the default mount options used for the overlay mount.
+// NOTE: Options are not applied to bind mounts.
+func WithMountOptions(options []string) Opt {
+	return func(config *SnapshotterConfig) error {
+		config.mountOptions = append(config.mountOptions, options...)
+		return nil
+	}
+}
+
+type MetaStore interface {
+	TransactionContext(ctx context.Context, writable bool) (context.Context, storage.Transactor, error)
+	WithTransaction(ctx context.Context, writable bool, fn storage.TransactionCallback) error
+	Close() error
+}
+
+// WithMetaStore allows the MetaStore to be created outside the snapshotter
+// and passed in.
+func WithMetaStore(ms MetaStore) Opt {
+	return func(config *SnapshotterConfig) error {
+		config.ms = ms
+		return nil
+	}
+}
+
 type snapshotter struct {
 	root          string
-	ms            *storage.MetaStore
+	ms            MetaStore
 	asyncRemove   bool
 	upperdirLabel bool
-	indexOff      bool
-	userxattr     bool // whether to enable "userxattr" mount option
+	options       []string
 }
 
 // NewSnapshotter returns a Snapshotter which uses overlayfs. The overlayfs
@@ -98,28 +122,52 @@ func NewSnapshotter(root string, opts ...Opt) (snapshots.Snapshotter, error) {
 	if !supportsDType {
 		return nil, fmt.Errorf("%s does not support d_type. If the backing filesystem is xfs, please reformat with ftype=1 to enable d_type support", root)
 	}
-	ms, err := storage.NewMetaStore(filepath.Join(root, "metadata.db"))
-	if err != nil {
-		return nil, err
+	if config.ms == nil {
+		config.ms, err = storage.NewMetaStore(filepath.Join(root, "metadata.db"))
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if err := os.Mkdir(filepath.Join(root, "snapshots"), 0700); err != nil && !os.IsExist(err) {
 		return nil, err
 	}
-	// figure out whether "userxattr" option is recognized by the kernel && needed
-	userxattr, err := overlayutils.NeedsUserXAttr(root)
-	if err != nil {
-		logrus.WithError(err).Warnf("cannot detect whether \"userxattr\" option needs to be used, assuming to be %v", userxattr)
+
+	if !hasOption(config.mountOptions, "userxattr", false) {
+		// figure out whether "userxattr" option is recognized by the kernel && needed
+		userxattr, err := overlayutils.NeedsUserXAttr(root)
+		if err != nil {
+			logrus.WithError(err).Warnf("cannot detect whether \"userxattr\" option needs to be used, assuming to be %v", userxattr)
+		}
+		if userxattr {
+			config.mountOptions = append(config.mountOptions, "userxattr")
+		}
+	}
+
+	if !hasOption(config.mountOptions, "index", false) && supportsIndex() {
+		config.mountOptions = append(config.mountOptions, "index=off")
 	}
 
 	return &snapshotter{
 		root:          root,
-		ms:            ms,
+		ms:            config.ms,
 		asyncRemove:   config.asyncRemove,
 		upperdirLabel: config.upperdirLabel,
-		indexOff:      supportsIndex(),
-		userxattr:     userxattr,
+		options:       config.mountOptions,
 	}, nil
+}
+
+func hasOption(options []string, key string, hasValue bool) bool {
+	for _, option := range options {
+		if hasValue {
+			if strings.HasPrefix(option, key) && len(option) > len(key) && option[len(key)] == '=' {
+				return true
+			}
+		} else if option == key {
+			return true
+		}
+	}
+	return false
 }
 
 // Stat returns the info for an active or committed snapshot by name or
@@ -127,15 +175,13 @@ func NewSnapshotter(root string, opts ...Opt) (snapshots.Snapshotter, error) {
 //
 // Should be used for parent resolution, existence checks and to discern
 // the kind of snapshot.
-func (o *snapshotter) Stat(ctx context.Context, key string) (snapshots.Info, error) {
-	ctx, t, err := o.ms.TransactionContext(ctx, false)
-	if err != nil {
-		return snapshots.Info{}, err
-	}
-	defer t.Rollback()
-	id, info, _, err := storage.GetInfo(ctx, key)
-	if err != nil {
-		return snapshots.Info{}, err
+func (o *snapshotter) Stat(ctx context.Context, key string) (info snapshots.Info, err error) {
+	var id string
+	if err := o.ms.WithTransaction(ctx, false, func(ctx context.Context) error {
+		id, info, _, err = storage.GetInfo(ctx, key)
+		return err
+	}); err != nil {
+		return info, err
 	}
 
 	if o.upperdirLabel {
@@ -144,38 +190,29 @@ func (o *snapshotter) Stat(ctx context.Context, key string) (snapshots.Info, err
 		}
 		info.Labels[upperdirKey] = o.upperPath(id)
 	}
-
 	return info, nil
 }
 
-func (o *snapshotter) Update(ctx context.Context, info snapshots.Info, fieldpaths ...string) (snapshots.Info, error) {
-	ctx, t, err := o.ms.TransactionContext(ctx, true)
-	if err != nil {
-		return snapshots.Info{}, err
-	}
-
-	info, err = storage.UpdateInfo(ctx, info, fieldpaths...)
-	if err != nil {
-		t.Rollback()
-		return snapshots.Info{}, err
-	}
-
-	if o.upperdirLabel {
-		id, _, _, err := storage.GetInfo(ctx, info.Name)
+func (o *snapshotter) Update(ctx context.Context, info snapshots.Info, fieldpaths ...string) (newInfo snapshots.Info, err error) {
+	err = o.ms.WithTransaction(ctx, true, func(ctx context.Context) error {
+		newInfo, err = storage.UpdateInfo(ctx, info, fieldpaths...)
 		if err != nil {
-			return snapshots.Info{}, err
+			return err
 		}
-		if info.Labels == nil {
-			info.Labels = make(map[string]string)
+
+		if o.upperdirLabel {
+			id, _, _, err := storage.GetInfo(ctx, newInfo.Name)
+			if err != nil {
+				return err
+			}
+			if newInfo.Labels == nil {
+				newInfo.Labels = make(map[string]string)
+			}
+			newInfo.Labels[upperdirKey] = o.upperPath(id)
 		}
-		info.Labels[upperdirKey] = o.upperPath(id)
-	}
-
-	if err := t.Commit(); err != nil {
-		return snapshots.Info{}, err
-	}
-
-	return info, nil
+		return nil
+	})
+	return newInfo, err
 }
 
 // Usage returns the resources taken by the snapshot identified by key.
@@ -184,16 +221,17 @@ func (o *snapshotter) Update(ctx context.Context, info snapshots.Info, fieldpath
 // "upper") directory and may take some time.
 //
 // For committed snapshots, the value is returned from the metadata database.
-func (o *snapshotter) Usage(ctx context.Context, key string) (snapshots.Usage, error) {
-	ctx, t, err := o.ms.TransactionContext(ctx, false)
-	if err != nil {
-		return snapshots.Usage{}, err
-	}
-	id, info, usage, err := storage.GetInfo(ctx, key)
-	t.Rollback() // transaction no longer needed at this point.
-
-	if err != nil {
-		return snapshots.Usage{}, err
+func (o *snapshotter) Usage(ctx context.Context, key string) (_ snapshots.Usage, err error) {
+	var (
+		usage snapshots.Usage
+		info  snapshots.Info
+		id    string
+	)
+	if err := o.ms.WithTransaction(ctx, false, func(ctx context.Context) error {
+		id, info, usage, err = storage.GetInfo(ctx, key)
+		return err
+	}); err != nil {
+		return usage, err
 	}
 
 	if info.Kind == snapshots.KindActive {
@@ -203,10 +241,8 @@ func (o *snapshotter) Usage(ctx context.Context, key string) (snapshots.Usage, e
 			// TODO(stevvooe): Consider not reporting an error in this case.
 			return snapshots.Usage{}, err
 		}
-
 		usage = snapshots.Usage(du)
 	}
-
 	return usage, nil
 }
 
@@ -222,117 +258,91 @@ func (o *snapshotter) View(ctx context.Context, key, parent string, opts ...snap
 // called on an read-write or readonly transaction.
 //
 // This can be used to recover mounts after calling View or Prepare.
-func (o *snapshotter) Mounts(ctx context.Context, key string) ([]mount.Mount, error) {
-	ctx, t, err := o.ms.TransactionContext(ctx, false)
-	if err != nil {
+func (o *snapshotter) Mounts(ctx context.Context, key string) (_ []mount.Mount, err error) {
+	var s storage.Snapshot
+	if err := o.ms.WithTransaction(ctx, false, func(ctx context.Context) error {
+		s, err = storage.GetSnapshot(ctx, key)
+		if err != nil {
+			return fmt.Errorf("failed to get active mount: %w", err)
+		}
+		return nil
+	}); err != nil {
 		return nil, err
-	}
-	s, err := storage.GetSnapshot(ctx, key)
-	t.Rollback()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get active mount: %w", err)
 	}
 	return o.mounts(s), nil
 }
 
 func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snapshots.Opt) error {
-	ctx, t, err := o.ms.TransactionContext(ctx, true)
-	if err != nil {
-		return err
-	}
-
-	defer func() {
+	return o.ms.WithTransaction(ctx, true, func(ctx context.Context) error {
+		// grab the existing id
+		id, _, _, err := storage.GetInfo(ctx, key)
 		if err != nil {
-			if rerr := t.Rollback(); rerr != nil {
-				log.G(ctx).WithError(rerr).Warn("failed to rollback transaction")
-			}
+			return err
 		}
-	}()
 
-	// grab the existing id
-	id, _, _, err := storage.GetInfo(ctx, key)
-	if err != nil {
-		return err
-	}
+		usage, err := fs.DiskUsage(ctx, o.upperPath(id))
+		if err != nil {
+			return err
+		}
 
-	usage, err := fs.DiskUsage(ctx, o.upperPath(id))
-	if err != nil {
-		return err
-	}
-
-	if _, err = storage.CommitActive(ctx, key, name, snapshots.Usage(usage), opts...); err != nil {
-		return fmt.Errorf("failed to commit snapshot: %w", err)
-	}
-	return t.Commit()
+		if _, err = storage.CommitActive(ctx, key, name, snapshots.Usage(usage), opts...); err != nil {
+			return fmt.Errorf("failed to commit snapshot %s: %w", key, err)
+		}
+		return nil
+	})
 }
 
 // Remove abandons the snapshot identified by key. The snapshot will
 // immediately become unavailable and unrecoverable. Disk space will
 // be freed up on the next call to `Cleanup`.
 func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
-	ctx, t, err := o.ms.TransactionContext(ctx, true)
-	if err != nil {
-		return err
-	}
+	var removals []string
+	// Remove directories after the transaction is closed, failures must not
+	// return error since the transaction is committed with the removal
+	// key no longer available.
 	defer func() {
-		if err != nil {
-			if rerr := t.Rollback(); rerr != nil {
-				log.G(ctx).WithError(rerr).Warn("failed to rollback transaction")
+		if err == nil {
+			for _, dir := range removals {
+				if err := os.RemoveAll(dir); err != nil {
+					log.G(ctx).WithError(err).WithField("path", dir).Warn("failed to remove directory")
+				}
 			}
 		}
 	}()
-
-	_, _, err = storage.Remove(ctx, key)
-	if err != nil {
-		return fmt.Errorf("failed to remove: %w", err)
-	}
-
-	if !o.asyncRemove {
-		var removals []string
-		removals, err = o.getCleanupDirectories(ctx, t)
+	return o.ms.WithTransaction(ctx, true, func(ctx context.Context) error {
+		_, _, err = storage.Remove(ctx, key)
 		if err != nil {
-			return fmt.Errorf("unable to get directories for removal: %w", err)
+			return fmt.Errorf("failed to remove snapshot %s: %w", key, err)
 		}
 
-		// Remove directories after the transaction is closed, failures must not
-		// return error since the transaction is committed with the removal
-		// key no longer available.
-		defer func() {
-			if err == nil {
-				for _, dir := range removals {
-					if err := os.RemoveAll(dir); err != nil {
-						log.G(ctx).WithError(err).WithField("path", dir).Warn("failed to remove directory")
-					}
-				}
+		if !o.asyncRemove {
+			removals, err = o.getCleanupDirectories(ctx)
+			if err != nil {
+				return fmt.Errorf("unable to get directories for removal: %w", err)
 			}
-		}()
-
-	}
-
-	return t.Commit()
+		}
+		return nil
+	})
 }
 
 // Walk the snapshots.
 func (o *snapshotter) Walk(ctx context.Context, fn snapshots.WalkFunc, fs ...string) error {
-	ctx, t, err := o.ms.TransactionContext(ctx, false)
-	if err != nil {
-		return err
-	}
-	defer t.Rollback()
-	if o.upperdirLabel {
-		return storage.WalkInfo(ctx, func(ctx context.Context, info snapshots.Info) error {
-			id, _, _, err := storage.GetInfo(ctx, info.Name)
-			if err != nil {
-				return err
-			}
-			if info.Labels == nil {
-				info.Labels = make(map[string]string)
-			}
-			info.Labels[upperdirKey] = o.upperPath(id)
-			return fn(ctx, info)
-		}, fs...)
-	}
-	return storage.WalkInfo(ctx, fn, fs...)
+	return o.ms.WithTransaction(ctx, false, func(ctx context.Context) error {
+		if o.upperdirLabel {
+			return storage.WalkInfo(ctx, func(ctx context.Context, info snapshots.Info) error {
+				id, _, _, err := storage.GetInfo(ctx, info.Name)
+				if err != nil {
+					return err
+				}
+				if info.Labels == nil {
+					info.Labels = make(map[string]string)
+				}
+				info.Labels[upperdirKey] = o.upperPath(id)
+				return fn(ctx, info)
+			}, fs...)
+		}
+		return storage.WalkInfo(ctx, fn, fs...)
+	})
 }
 
 // Cleanup cleans up disk resources from removed or abandoned snapshots
@@ -351,19 +361,20 @@ func (o *snapshotter) Cleanup(ctx context.Context) error {
 	return nil
 }
 
-func (o *snapshotter) cleanupDirectories(ctx context.Context) ([]string, error) {
+func (o *snapshotter) cleanupDirectories(ctx context.Context) (_ []string, err error) {
+	var cleanupDirs []string
 	// Get a write transaction to ensure no other write transaction can be entered
 	// while the cleanup is scanning.
-	ctx, t, err := o.ms.TransactionContext(ctx, true)
-	if err != nil {
+	if err := o.ms.WithTransaction(ctx, true, func(ctx context.Context) error {
+		cleanupDirs, err = o.getCleanupDirectories(ctx)
+		return err
+	}); err != nil {
 		return nil, err
 	}
-
-	defer t.Rollback()
-	return o.getCleanupDirectories(ctx, t)
+	return cleanupDirs, nil
 }
 
-func (o *snapshotter) getCleanupDirectories(ctx context.Context, t storage.Transactor) ([]string, error) {
+func (o *snapshotter) getCleanupDirectories(ctx context.Context) ([]string, error) {
 	ids, err := storage.IDMap(ctx)
 	if err != nil {
 		return nil, err
@@ -386,7 +397,6 @@ func (o *snapshotter) getCleanupDirectories(ctx context.Context, t storage.Trans
 		if _, ok := ids[d]; ok {
 			continue
 		}
-
 		cleanup = append(cleanup, filepath.Join(snapshotDir, d))
 	}
 
@@ -394,12 +404,11 @@ func (o *snapshotter) getCleanupDirectories(ctx context.Context, t storage.Trans
 }
 
 func (o *snapshotter) createSnapshot(ctx context.Context, kind snapshots.Kind, key, parent string, opts []snapshots.Opt) (_ []mount.Mount, err error) {
-	ctx, t, err := o.ms.TransactionContext(ctx, true)
-	if err != nil {
-		return nil, err
-	}
+	var (
+		s        storage.Snapshot
+		td, path string
+	)
 
-	var td, path string
 	defer func() {
 		if err != nil {
 			if td != "" {
@@ -416,53 +425,39 @@ func (o *snapshotter) createSnapshot(ctx context.Context, kind snapshots.Kind, k
 		}
 	}()
 
-	snapshotDir := filepath.Join(o.root, "snapshots")
-	td, err = o.prepareDirectory(ctx, snapshotDir, kind)
-	if err != nil {
-		if rerr := t.Rollback(); rerr != nil {
-			log.G(ctx).WithError(rerr).Warn("failed to rollback transaction")
-		}
-		return nil, fmt.Errorf("failed to create prepare snapshot dir: %w", err)
-	}
-	rollback := true
-	defer func() {
-		if rollback {
-			if rerr := t.Rollback(); rerr != nil {
-				log.G(ctx).WithError(rerr).Warn("failed to rollback transaction")
-			}
-		}
-	}()
-
-	s, err := storage.CreateSnapshot(ctx, kind, key, parent, opts...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create snapshot: %w", err)
-	}
-
-	if len(s.ParentIDs) > 0 {
-		st, err := os.Stat(o.upperPath(s.ParentIDs[0]))
+	if err := o.ms.WithTransaction(ctx, true, func(ctx context.Context) (err error) {
+		snapshotDir := filepath.Join(o.root, "snapshots")
+		td, err = o.prepareDirectory(ctx, snapshotDir, kind)
 		if err != nil {
-			return nil, fmt.Errorf("failed to stat parent: %w", err)
+			return fmt.Errorf("failed to create prepare snapshot dir: %w", err)
 		}
 
-		stat := st.Sys().(*syscall.Stat_t)
+		s, err = storage.CreateSnapshot(ctx, kind, key, parent, opts...)
+		if err != nil {
+			return fmt.Errorf("failed to create snapshot: %w", err)
+		}
 
-		if err := os.Lchown(filepath.Join(td, "fs"), int(stat.Uid), int(stat.Gid)); err != nil {
-			if rerr := t.Rollback(); rerr != nil {
-				log.G(ctx).WithError(rerr).Warn("failed to rollback transaction")
+		if len(s.ParentIDs) > 0 {
+			st, err := os.Stat(o.upperPath(s.ParentIDs[0]))
+			if err != nil {
+				return fmt.Errorf("failed to stat parent: %w", err)
 			}
-			return nil, fmt.Errorf("failed to chown: %w", err)
+
+			stat := st.Sys().(*syscall.Stat_t)
+			if err := os.Lchown(filepath.Join(td, "fs"), int(stat.Uid), int(stat.Gid)); err != nil {
+				return fmt.Errorf("failed to chown: %w", err)
+			}
 		}
-	}
 
-	path = filepath.Join(snapshotDir, s.ID)
-	if err = os.Rename(td, path); err != nil {
-		return nil, fmt.Errorf("failed to rename: %w", err)
-	}
-	td = ""
+		path = filepath.Join(snapshotDir, s.ID)
+		if err = os.Rename(td, path); err != nil {
+			return fmt.Errorf("failed to rename: %w", err)
+		}
+		td = ""
 
-	rollback = false
-	if err = t.Commit(); err != nil {
-		return nil, fmt.Errorf("commit failed: %w", err)
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
 	return o.mounts(s), nil
@@ -507,17 +502,8 @@ func (o *snapshotter) mounts(s storage.Snapshot) []mount.Mount {
 			},
 		}
 	}
-	var options []string
 
-	// set index=off when mount overlayfs
-	if o.indexOff {
-		options = append(options, "index=off")
-	}
-
-	if o.userxattr {
-		options = append(options, "userxattr")
-	}
-
+	options := o.options
 	if s.Kind == snapshots.KindActive {
 		options = append(options,
 			fmt.Sprintf("workdir=%s", o.workPath(s.ID)),
