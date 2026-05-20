@@ -95,6 +95,10 @@ func (w *containerdExecutor) Run(ctx context.Context, id string, root executor.M
 	if id == "" {
 		id = identity.NewID()
 	}
+	// Validate ID to prevent path traversal attacks (GHSA-4c29-8rgm-jvjj / CVE-2026-33747).
+	if err := executor.ValidContainerID(id); err != nil {
+		return nil, err
+	}
 
 	startedOnce := sync.Once{}
 	done := make(chan error, 1)

@@ -146,6 +146,14 @@ func New(opt Opt, networkProviders map[pb.NetMode]network.Provider) (executor.Ex
 }
 
 func (w *runcExecutor) Run(ctx context.Context, id string, root executor.Mount, mounts []executor.Mount, process executor.ProcessInfo, started chan<- struct{}) (rec resourcestypes.Recorder, err error) {
+	// Generate a default ID if none provided, then validate to prevent path traversal attacks
+	// (GHSA-4c29-8rgm-jvjj / CVE-2026-33747).
+	if id == "" {
+		id = identity.NewID()
+	}
+	if err := executor.ValidContainerID(id); err != nil {
+		return nil, err
+	}
 	startedOnce := sync.Once{}
 	done := make(chan error, 1)
 	w.mu.Lock()
@@ -210,9 +218,6 @@ func (w *runcExecutor) Run(ctx context.Context, id string, root executor.Mount, 
 		defer release()
 	}
 
-	if id == "" {
-		id = identity.NewID()
-	}
 	bundle := filepath.Join(w.root, id)
 
 	if err := os.Mkdir(bundle, 0o711); err != nil {
